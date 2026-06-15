@@ -1630,10 +1630,10 @@ impl RackState {
     }
 
     fn paint_cables(&self, ui: &Ui) {
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            egui::Id::new("cables"),
-        ));
+        // Paint in the rack's own layer (called after the modules, so cables
+        // draw over them) rather than a foreground layer — that way menus,
+        // dialogs and the toolbar still render on top of the cables.
+        let painter = ui.painter().clone();
         for cable in &self.patch.cables {
             let (Some(a), Some(b)) = (
                 self.port_center(cable.from.module, PortSide::Out, cable.from.port),
