@@ -1,9 +1,16 @@
 # Music Rack
 
+**▶ Live demo: https://alexatk502.github.io/music_rack/**
+
 A VCV Rack-style modular synthesizer that runs entirely in the browser. The
 whole app is Rust compiled to WebAssembly: an egui rack UI on canvas, and a
 pure-Rust DSP engine running inside a Web Audio AudioWorklet. The only
 hand-written JavaScript is the worklet bootstrap shim.
+
+The live site is built and published by GitHub Actions
+([`.github/workflows/pages.yml`](.github/workflows/pages.yml)) on every push to
+`main` — it runs `wasm-pack` for both crates and deploys `web/` to GitHub Pages,
+so the built wasm never needs to live in the repo.
 
 ![rack](docs/rack.png)
 
