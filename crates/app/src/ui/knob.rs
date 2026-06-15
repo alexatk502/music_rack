@@ -2,7 +2,7 @@
 //! control, double-click to reset. Returns the inner Response; `changed()`
 //! reports value changes so the caller can emit a SetParam message.
 
-use eframe::egui::{self, Color32, Response, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{self, Response, Sense, Stroke, Ui, Vec2};
 use std::ops::RangeInclusive;
 
 const KNOB_SIZE: f32 = 36.0;
@@ -46,18 +46,24 @@ pub fn knob(
         let t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
         let angle = ANGLE_MIN + t * (ANGLE_MAX - ANGLE_MIN);
 
-        let painter = ui.painter();
-        let body = if response.hovered() {
-            Color32::from_gray(70)
-        } else {
-            Color32::from_gray(55)
+        // Theme-derived colors: body/ring from the widget visuals, pointer from
+        // the selection accent (set per theme).
+        let (body, ring, pointer) = {
+            let v = ui.visuals();
+            let body = if response.hovered() {
+                v.widgets.hovered.bg_fill
+            } else {
+                v.widgets.inactive.bg_fill
+            };
+            (body, v.widgets.inactive.fg_stroke.color, v.selection.bg_fill)
         };
-        painter.circle(center, radius, body, Stroke::new(1.5, Color32::from_gray(140)));
+        let painter = ui.painter();
+        painter.circle(center, radius, body, Stroke::new(1.5, ring));
         // Pointer line: angle 0 = straight up.
         let dir = Vec2::new(angle.sin(), -angle.cos());
         painter.line_segment(
             [center + dir * (radius * 0.35), center + dir * (radius * 0.95)],
-            Stroke::new(2.0, Color32::from_rgb(255, 200, 80)),
+            Stroke::new(2.0, pointer),
         );
 
         ui.label(egui::RichText::new(format!("{value:.2}")).size(9.0).weak());

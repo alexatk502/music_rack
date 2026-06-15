@@ -7,6 +7,7 @@
 use crate::audio::MeterMap;
 use crate::engine_link::EngineLink;
 use crate::ui::knob::knob;
+use crate::ui::theme::{Palette, Theme};
 use rack_core::meters::MeterEntry;
 use eframe::egui::{
     self, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2,
@@ -308,6 +309,8 @@ pub struct RackState {
     /// Undo/redo history of whole-patch snapshots (structural edits only).
     undo: Vec<Patch>,
     redo: Vec<Patch>,
+    /// Active theme palette for the hand-painted canvas (set each frame).
+    palette: Palette,
 }
 
 impl RackState {
@@ -325,6 +328,7 @@ impl RackState {
             clipboard: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            palette: Theme::Dark.palette(),
         }
     }
 
@@ -524,8 +528,10 @@ impl RackState {
         link: &mut EngineLink,
         meters: &MeterMap,
         customs: &[CustomModule],
+        palette: Palette,
     ) -> bool {
         let mut topology_changed = false;
+        self.palette = palette;
         self.port_rects.clear();
 
         egui::ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
@@ -594,11 +600,12 @@ impl RackState {
             if let (Some(start), true) = (self.box_select, canvas.dragged()) {
                 if let Some(cur) = ui.ctx().pointer_interact_pos() {
                     let rect = Rect::from_two_pos(start, cur);
+                    let a = self.palette.accent;
                     ui.painter().rect(
                         rect,
                         0.0,
-                        Color32::from_rgba_unmultiplied(255, 200, 80, 20),
-                        Stroke::new(1.0, Color32::from_rgb(255, 200, 80)),
+                        Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), 20),
+                        Stroke::new(1.0, a),
                         StrokeKind::Inside,
                     );
                 }
@@ -879,15 +886,16 @@ impl RackState {
         let entry = scope_src.and_then(|m| self.planner.slot_of(m)).and_then(|s| meters.get(&s));
         let full_scale = if scope_kind == Some(ModuleKindId::Output) { 1.0 } else { 6.0 };
 
+        let pal = self.palette;
         // Box body — same panel palette as a module so it reads as one.
         ui.painter().rect(
             rect,
             4.0,
-            Color32::from_gray(38),
+            pal.panel,
             if all_selected {
-                Stroke::new(2.0, Color32::from_rgb(255, 200, 80))
+                Stroke::new(2.0, pal.accent)
             } else {
-                Stroke::new(1.0, Color32::from_gray(90))
+                Stroke::new(1.0, pal.border)
             },
             StrokeKind::Inside,
         );
@@ -898,26 +906,20 @@ impl RackState {
         let title_rect = Rect::from_min_size(rect.min, Vec2::new(width, TITLE_H));
         let title_resp =
             ui.interact(title_rect, ui.id().with(("group", gid)), Sense::click_and_drag());
-        ui.painter().rect(
-            title_rect,
-            4.0,
-            Color32::from_rgb(60, 70, 88),
-            Stroke::NONE,
-            StrokeKind::Inside,
-        );
+        ui.painter().rect(title_rect, 4.0, pal.title_group, Stroke::NONE, StrokeKind::Inside);
         ui.painter().text(
             title_rect.center(),
             egui::Align2::CENTER_CENTER,
             format!("▣ {name}"),
             egui::FontId::proportional(12.0),
-            Color32::from_gray(230),
+            pal.title_text,
         );
 
         // Peak LED, exactly like a module's.
         let peak = entry.map_or(0.0, |e| e.peak);
         let led = peak / full_scale;
         let led_color = if led < 0.01 {
-            Color32::from_gray(60)
+            pal.led_off
         } else if led < 0.6 {
             Color32::from_rgb(80, 220, 100)
         } else if led < 0.85 {
@@ -929,7 +931,7 @@ impl RackState {
             Pos2::new(title_rect.max.x - 11.0, title_rect.center().y),
             4.0,
             led_color,
-            Stroke::new(1.0, Color32::from_gray(20)),
+            Stroke::new(1.0, pal.outline),
         );
 
         if title_resp.double_clicked() {
@@ -1033,7 +1035,7 @@ impl RackState {
                 Pos2::new(rect.min.x + 6.0, y + 2.0),
                 Pos2::new(rect.max.x - 6.0, y + 46.0),
             );
-            paint_scope(ui, scope_rect, entry, full_scale);
+            paint_scope(ui, scope_rect, entry, full_scale, &pal);
             y += scope_h;
         }
 
@@ -1091,16 +1093,17 @@ impl RackState {
             self.select(id, additive);
         }
 
+        let pal = self.palette;
         let selected = self.selected.contains(&id);
         let painter = ui.painter();
         painter.rect(
             rect,
             4.0,
-            Color32::from_gray(38),
+            pal.panel,
             if selected {
-                Stroke::new(2.0, Color32::from_rgb(255, 200, 80))
+                Stroke::new(2.0, pal.accent)
             } else {
-                Stroke::new(1.0, Color32::from_gray(90))
+                Stroke::new(1.0, pal.border)
             },
             StrokeKind::Inside,
         );
@@ -1124,15 +1127,14 @@ impl RackState {
             self.push_undo(); // snapshot once at the start of a move
         }
         // Grouped (but expanded) modules get a slate title tint as a cue.
-        let title_bg =
-            if group.is_some() { Color32::from_rgb(60, 70, 88) } else { Color32::from_gray(55) };
+        let title_bg = if group.is_some() { pal.title_group } else { pal.title };
         ui.painter().rect(title_rect, 4.0, title_bg, Stroke::NONE, StrokeKind::Inside);
         ui.painter().text(
             title_rect.center(),
             egui::Align2::CENTER_CENTER,
             desc.name,
             egui::FontId::proportional(12.0),
-            Color32::from_gray(220),
+            pal.title_text,
         );
         if title_resp.dragged() {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -1282,7 +1284,7 @@ impl RackState {
         let peak = entry.map_or(0.0, |e| e.peak);
         let led = peak / full_scale;
         let led_color = if led < 0.01 {
-            Color32::from_gray(60)
+            pal.led_off
         } else if led < 0.6 {
             Color32::from_rgb(80, 220, 100)
         } else if led < 0.85 {
@@ -1294,7 +1296,7 @@ impl RackState {
             Pos2::new(title_rect.max.x - 11.0, title_rect.center().y),
             4.0,
             led_color,
-            Stroke::new(1.0, Color32::from_gray(20)),
+            Stroke::new(1.0, pal.outline),
         );
 
         // Scope strip above the port row, when params leave room for it.
@@ -1311,12 +1313,12 @@ impl RackState {
         // Meter readout modules show a number/note/visualization instead of the
         // small scope strip.
         match kind {
-            ModuleKindId::Voltmeter => paint_readout(ui, scope_rect, readout_volts(entry)),
-            ModuleKindId::Tuner => paint_readout(ui, scope_rect, readout_note(entry)),
-            ModuleKindId::Scope => paint_scope_big(ui, big_rect, entry),
-            ModuleKindId::Spectrum => paint_spectrum(ui, big_rect, entry),
+            ModuleKindId::Voltmeter => paint_readout(ui, scope_rect, readout_volts(entry), &pal),
+            ModuleKindId::Tuner => paint_readout(ui, scope_rect, readout_note(entry), &pal),
+            ModuleKindId::Scope => paint_scope_big(ui, big_rect, entry, &pal),
+            ModuleKindId::Spectrum => paint_spectrum(ui, big_rect, entry, &pal),
             _ if params_bottom < scope_rect.min.y - 2.0 => {
-                paint_scope(ui, scope_rect, entry, full_scale);
+                paint_scope(ui, scope_rect, entry, full_scale, &pal);
             }
             _ => {}
         }
@@ -1364,6 +1366,7 @@ impl RackState {
             Color32::from_rgb(110, 210, 120),
             Color32::from_rgb(120, 170, 240),
         ];
+        let pal = self.palette;
         let Some(inst) = self.patch.modules.get(&id) else { return 0.0 };
         let masks: [u32; TRACKS] =
             std::array::from_fn(|t| inst.params[t] as u32 & 0xFFFF);
@@ -1384,7 +1387,7 @@ impl RackState {
                 egui::Align2::LEFT_CENTER,
                 format!("{}", t + 1),
                 egui::FontId::proportional(9.0),
-                Color32::from_gray(150),
+                pal.text_dim,
             );
             for s in 0..STEPS {
                 let x = left + s as f32 * (cell_w + gap);
@@ -1392,12 +1395,12 @@ impl RackState {
                 let resp = ui.interact(cell, ui.id().with(("beat", id, t, s)), Sense::click());
                 let on = mask & (1 << s) != 0;
                 // Group beats in fours: every fourth column reads brighter.
-                let off_bg = if s % 4 == 0 { Color32::from_gray(64) } else { Color32::from_gray(40) };
+                let off_bg = if s % 4 == 0 { pal.cell_off4 } else { pal.cell_off };
                 let fill = if on { COLORS[t] } else { off_bg };
                 let stroke = if resp.hovered() {
-                    Stroke::new(1.0, Color32::from_gray(200))
+                    Stroke::new(1.0, pal.hover)
                 } else {
-                    Stroke::new(1.0, Color32::from_gray(24))
+                    Stroke::new(1.0, pal.cell_border)
                 };
                 ui.painter().rect(cell, 1.5, fill, stroke, StrokeKind::Inside);
                 if resp.clicked() {
@@ -1470,7 +1473,7 @@ impl RackState {
             ui.painter().circle_filled(
                 resp.rect.right_top() + Vec2::new(-3.0, 3.0),
                 3.0,
-                Color32::from_rgb(110, 200, 240),
+                self.palette.accent2,
             );
         }
     }
@@ -1538,26 +1541,27 @@ impl RackState {
             });
         }
 
+        let pal = self.palette;
         let painter = ui.painter();
         let fill = match side {
-            PortSide::In => Color32::from_gray(25),
-            PortSide::Out => Color32::from_gray(15),
+            PortSide::In => pal.port_in,
+            PortSide::Out => pal.port_out,
         };
         let ring = if resp.hovered() || self.drag.is_some() {
-            Color32::from_rgb(255, 200, 80)
+            pal.accent
         } else if exposed {
-            Color32::from_rgb(110, 200, 240) // exposed ports glow blue
+            pal.accent2 // exposed ports glow blue
         } else {
-            Color32::from_gray(130)
+            pal.port_ring
         };
         painter.circle(center, PORT_R, fill, Stroke::new(if exposed { 2.0 } else { 1.5 }, ring));
-        painter.circle(center, PORT_R * 0.45, Color32::from_gray(70), Stroke::NONE);
+        painter.circle(center, PORT_R * 0.45, pal.port_dot, Stroke::NONE);
         painter.text(
             Pos2::new(center.x, label_y),
             egui::Align2::CENTER_CENTER,
             name,
             egui::FontId::proportional(8.0),
-            Color32::from_gray(170),
+            pal.text_dim,
         );
         topology_changed
     }
@@ -1593,7 +1597,7 @@ impl RackState {
                 self.port_center(drag.from_output.module, PortSide::Out, drag.from_output.port),
                 ui.ctx().pointer_interact_pos(),
             ) {
-                paint_cable(&painter, a, p, Color32::from_rgb(255, 200, 80));
+                paint_cable(&painter, a, p, self.palette.accent);
             }
         }
     }
@@ -1611,19 +1615,19 @@ fn cable_color(id: u64) -> Color32 {
 }
 
 /// Mini oscilloscope: the module's recent output waveform on a dark strip.
-fn paint_scope(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>, full_scale: f32) {
+fn paint_scope(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>, full_scale: f32, pal: &Palette) {
     let painter = ui.painter();
     painter.rect(
         rect,
         2.0,
-        Color32::from_gray(18),
-        Stroke::new(1.0, Color32::from_gray(70)),
+        pal.scope_bg,
+        Stroke::new(1.0, pal.scope_border),
         StrokeKind::Inside,
     );
     let mid = rect.center().y;
     painter.line_segment(
         [Pos2::new(rect.min.x, mid), Pos2::new(rect.max.x, mid)],
-        Stroke::new(1.0, Color32::from_gray(40)),
+        Stroke::new(1.0, pal.scope_grid),
     );
     let Some(entry) = entry else { return };
     let half = rect.height() * 0.5 - 2.0;
@@ -1638,34 +1642,33 @@ fn paint_scope(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>, full_scale: f32)
             Pos2::new(x, y)
         })
         .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(1.5, Color32::from_rgb(120, 230, 150))));
+    painter.add(egui::Shape::line(points, Stroke::new(1.5, pal.scope_line)));
 }
 
 /// Large oscilloscope display: the wire's waveform, auto-scaled to its own
 /// peak so both quiet CV and full-level audio stay readable, with a grid.
-fn paint_scope_big(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>) {
+fn paint_scope_big(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>, pal: &Palette) {
     let painter = ui.painter();
     painter.rect(
         rect,
         2.0,
-        Color32::from_gray(12),
-        Stroke::new(1.0, Color32::from_gray(70)),
+        pal.scope_bg,
+        Stroke::new(1.0, pal.scope_border),
         StrokeKind::Inside,
     );
     // Grid: centre line plus a couple of divisions.
-    let grid = Color32::from_gray(34);
     for f in [0.25, 0.5, 0.75] {
         let y = rect.min.y + rect.height() * f;
         painter.line_segment(
             [Pos2::new(rect.min.x, y), Pos2::new(rect.max.x, y)],
-            Stroke::new(1.0, if f == 0.5 { Color32::from_gray(55) } else { grid }),
+            Stroke::new(1.0, if f == 0.5 { pal.scope_mid } else { pal.scope_grid }),
         );
     }
     for f in [0.25, 0.5, 0.75] {
         let x = rect.min.x + rect.width() * f;
         painter.line_segment(
             [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
-            Stroke::new(1.0, grid),
+            Stroke::new(1.0, pal.scope_grid),
         );
     }
     let Some(entry) = entry else { return };
@@ -1684,25 +1687,25 @@ fn paint_scope_big(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>) {
             Pos2::new(x, y)
         })
         .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(1.5, Color32::from_rgb(120, 230, 150))));
+    painter.add(egui::Shape::line(points, Stroke::new(1.5, pal.scope_line)));
     painter.text(
         rect.right_top() + Vec2::new(-4.0, 4.0),
         egui::Align2::RIGHT_TOP,
         format!("±{:.1}V", scale / 1.1),
         egui::FontId::monospace(8.0),
-        Color32::from_gray(120),
+        pal.text_dim,
     );
 }
 
 /// Spectrum display: magnitude of a direct DFT of the waveform tap, drawn as
 /// bars. Computed in the UI from the 128-sample scope buffer (no engine FFT).
-fn paint_spectrum(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>) {
+fn paint_spectrum(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>, pal: &Palette) {
     let painter = ui.painter();
     painter.rect(
         rect,
         2.0,
-        Color32::from_gray(12),
-        Stroke::new(1.0, Color32::from_gray(70)),
+        pal.scope_bg,
+        Stroke::new(1.0, pal.scope_border),
         StrokeKind::Inside,
     );
     let Some(entry) = entry else { return };
@@ -1734,7 +1737,7 @@ fn paint_spectrum(ui: &Ui, rect: Rect, entry: Option<&MeterEntry>) {
             Pos2::new(x + 0.5, rect.max.y - 2.0 - h),
             Pos2::new(x + bw - 0.5, rect.max.y - 2.0),
         );
-        painter.rect_filled(bar, 0.0, Color32::from_rgb(110, 200, 240));
+        painter.rect_filled(bar, 0.0, pal.bar);
     }
 }
 
@@ -1766,13 +1769,13 @@ fn readout_note(entry: Option<&MeterEntry>) -> String {
 }
 
 /// Big centered text readout (for voltmeter/tuner panels).
-fn paint_readout(ui: &Ui, rect: Rect, text: String) {
+fn paint_readout(ui: &Ui, rect: Rect, text: String, pal: &Palette) {
     let painter = ui.painter();
     painter.rect(
         rect,
         2.0,
-        Color32::from_gray(12),
-        Stroke::new(1.0, Color32::from_gray(70)),
+        pal.scope_bg,
+        Stroke::new(1.0, pal.scope_border),
         StrokeKind::Inside,
     );
     painter.text(
@@ -1780,7 +1783,7 @@ fn paint_readout(ui: &Ui, rect: Rect, text: String) {
         egui::Align2::CENTER_CENTER,
         text,
         egui::FontId::monospace(16.0),
-        Color32::from_rgb(120, 230, 150),
+        pal.readout,
     );
 }
 

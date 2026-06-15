@@ -62,6 +62,8 @@ pub struct RackApp {
     /// "Save selection as custom" panel state.
     show_save_custom: bool,
     custom_name: String,
+    /// Active UI theme (dark / light / high-contrast variants).
+    theme: crate::ui::theme::Theme,
 }
 
 impl RackApp {
@@ -81,6 +83,9 @@ impl RackApp {
             customs: patch_io::load_customs(),
             show_save_custom: false,
             custom_name: String::new(),
+            theme: patch_io::load_theme()
+                .map(|k| crate::ui::theme::Theme::from_key(&k))
+                .unwrap_or(crate::ui::theme::Theme::Dark),
         }
     }
 
@@ -130,6 +135,8 @@ impl RackApp {
 impl eframe::App for RackApp {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        // Apply the active theme's chrome visuals (cheap; egui dedups no-ops).
+        ctx.set_visuals(self.theme.visuals());
         egui::Panel::top("toolbar").show_inside(root, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Music Rack");
@@ -209,6 +216,16 @@ impl eframe::App for RackApp {
                     if ui.button("?").on_hover_text("Keyboard shortcuts").clicked() {
                         self.show_help = !self.show_help;
                     }
+                    // Theme picker.
+                    ui.menu_button(format!("Theme: {}", self.theme.label()), |ui| {
+                        for t in crate::ui::theme::Theme::ALL {
+                            if ui.selectable_label(self.theme == t, t.label()).clicked() {
+                                self.theme = t;
+                                patch_io::save_theme(t.key());
+                                ui.close();
+                            }
+                        }
+                    });
                     ui.weak(format!(
                         "play: A–K · octave: Z/X (C{}) · ? for shortcuts",
                         4 + self.piano.octave
@@ -291,11 +308,12 @@ impl eframe::App for RackApp {
         }
 
         let meters_rc = self.link.borrow().meters();
+        let palette = self.theme.palette();
         let topology_changed = egui::CentralPanel::default()
             .show_inside(root, |ui| {
                 let mut link = self.link.borrow_mut();
                 let meters = meters_rc.borrow();
-                self.rack.show(ui, &mut link, &meters, &self.customs)
+                self.rack.show(ui, &mut link, &meters, &self.customs, palette)
             })
             .inner;
         if topology_changed {

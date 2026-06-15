@@ -28,6 +28,20 @@ pub fn save_customs(customs: &[CustomModule]) {
     let _ = storage.set_item(CUSTOMS_KEY, &subpatch::customs_to_json(customs));
 }
 
+const THEME_KEY: &str = "music_rack_theme";
+
+/// Saved theme key, if any.
+pub fn load_theme() -> Option<String> {
+    web_sys::window()?.local_storage().ok()??.get_item(THEME_KEY).ok()?
+}
+
+/// Persist the chosen theme key.
+pub fn save_theme(key: &str) {
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = storage.set_item(THEME_KEY, key);
+    }
+}
+
 pub fn save_to_local_storage(patch: &Patch) {
     let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) else {
         return;
