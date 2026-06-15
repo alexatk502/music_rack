@@ -1,0 +1,8 @@
+[package]
+name = "rack-engine"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rack-core = { workspace = true }
+rack-dsp = { workspace = true }

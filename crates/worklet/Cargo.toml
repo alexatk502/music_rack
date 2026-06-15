@@ -1,0 +1,14 @@
+[package]
+name = "rack-worklet"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+# Keep this dependency surface minimal: the AudioWorkletGlobalScope has no
+# window/document/fetch, and stray web-sys features can generate glue that
+# throws at instantiation.
+[dependencies]
+rack-engine = { workspace = true }
+wasm-bindgen = "0.2"

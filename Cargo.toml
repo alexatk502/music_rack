@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/app",
+    "crates/core",
+    "crates/dsp",
+    "crates/engine",
+    "crates/graph",
+    "crates/worklet",
+]
+# app (eframe/winit) and worklet are wasm32-only; default cargo test/check
+# runs the native-testable crates.
+default-members = [
+    "crates/core",
+    "crates/dsp",
+    "crates/engine",
+    "crates/graph",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+rack-core = { path = "crates/core" }
+rack-dsp = { path = "crates/dsp" }
+rack-engine = { path = "crates/engine" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

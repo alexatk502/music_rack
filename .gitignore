@@ -1,0 +1,16 @@
+# Rust build output (large, regenerable)
+/target
+
+# wasm-pack build output — regenerate with the commands in README.md ▸ Build:
+#   wasm-pack build crates/worklet --target web --out-dir web/worklet --no-typescript
+#   wasm-pack build crates/app     --target web --out-dir web/app     --no-typescript
+/web/app/
+/web/worklet/
+
+# Local test-run artifacts (screenshots / result dumps)
+/web/tests/*.png
+/web/tests/*result*.txt
+
+# Editor / OS cruft
+*.swp
+.DS_Store

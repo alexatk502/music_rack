@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Music Rack — Phase 1 smoke test</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%231b1b1f'/><rect x='3' y='8' width='2' height='5' fill='%2350c8f0'/><rect x='7' y='5' width='2' height='8' fill='%23f0c850'/><rect x='11' y='3' width='2' height='10' fill='%2390d878'/></svg>" />
+  <style>
+    body { font-family: system-ui, sans-serif; background: #1b1b1f; color: #ddd;
+           display: grid; place-items: center; height: 100vh; margin: 0; }
+    main { text-align: center; }
+    button { font-size: 1.4rem; padding: 0.8rem 2.4rem; border-radius: 8px;
+             border: 1px solid #555; background: #2a2a30; color: #ddd; cursor: pointer; }
+    button:hover { background: #34343c; }
+    #status { margin-top: 1rem; color: #8a8; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Music Rack</h1>
+  <button id="power">Power on</button>
+  <p id="status"></p>
+  <p id="rms"></p>
+</main>
+<script type="module">
+  const status = document.getElementById('status');
+  const button = document.getElementById('power');
+  let audioCtx = null;
+  let node = null;
+
+  // Headless smoke tests can't click: ?autostart=1 powers on at load
+  // (requires --autoplay-policy=no-user-gesture-required).
+  if (new URLSearchParams(location.search).has('autostart')) {
+    setTimeout(() => button.click(), 0);
+  }
+
+  button.onclick = async () => {
+    try {
+      if (audioCtx) {
+        // Toggle off.
+        await audioCtx.close();
+        audioCtx = null;
+        node = null;
+        button.textContent = 'Power on';
+        status.textContent = '';
+        return;
+      }
+      // AudioContext must be created/resumed inside a user gesture.
+      audioCtx = new AudioContext();
+      await audioCtx.resume();
+      await audioCtx.audioWorklet.addModule('./worklet-shim.js');
+
+      // The worklet scope has no fetch: ship the raw wasm bytes over the
+      // port (compiled-Module cloning to the audio thread is unreliable —
+      // see worklet-shim.js) and let the worklet compile synchronously.
+      const wasmBytes = await (await fetch('./worklet/rack_worklet_bg.wasm')).arrayBuffer();
+
+      node = new AudioWorkletNode(audioCtx, 'rack-processor', {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+      node.port.onmessage = (e) => {
+        if (e.data.ready) status.textContent = `running @ ${audioCtx.sampleRate} Hz`;
+        if (e.data.error) status.textContent = `engine error: ${e.data.error}`;
+      };
+      node.port.postMessage({ wasmBytes }, [wasmBytes]);
+
+      // Analyser tap so the page itself can verify signal is flowing
+      // (useful for headless smoke tests; #rms updates continuously).
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      node.connect(analyser);
+      node.connect(audioCtx.destination);
+      const buf = new Float32Array(analyser.fftSize);
+      const rmsEl = document.getElementById('rms');
+      setInterval(() => {
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (const s of buf) sum += s * s;
+        rmsEl.textContent = `rms: ${Math.sqrt(sum / buf.length).toFixed(4)}`;
+      }, 250);
+      button.textContent = 'Power off';
+      status.textContent = 'starting…';
+    } catch (err) {
+      status.textContent = `failed: ${err}`;
+      console.error(err);
+    }
+  };
+</script>
+</body>
+</html>
