@@ -31,11 +31,13 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
+      # NB: wasm-pack resolves a relative --out-dir relative to the CRATE, not
+      # the workspace, so it must be absolute to land in the top-level web/.
       - name: Build worklet (DSP engine) wasm
-        run: wasm-pack build crates/worklet --target web --out-dir web/worklet --no-typescript
+        run: wasm-pack build crates/worklet --target web --out-dir "$GITHUB_WORKSPACE/web/worklet" --no-typescript
 
       - name: Build app (UI) wasm
-        run: wasm-pack build crates/app --target web --out-dir web/app --no-typescript
+        run: wasm-pack build crates/app --target web --out-dir "$GITHUB_WORKSPACE/web/app" --no-typescript
 
       - name: Make the synth the site landing page
         run: |

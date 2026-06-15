@@ -86,8 +86,10 @@ Requires Rust (stable, `wasm32-unknown-unknown` target) and
 [wasm-pack](https://rustwasm.github.io/wasm-pack/).
 
 ```sh
-wasm-pack build crates/worklet --target web --out-dir web/worklet --no-typescript
-wasm-pack build crates/app     --target web --out-dir web/app     --no-typescript
+# Run from the repo root. NB: wasm-pack resolves a relative --out-dir relative
+# to the *crate*, not the workspace, so the out-dir must be absolute.
+wasm-pack build crates/worklet --target web --out-dir "$PWD/web/worklet" --no-typescript
+wasm-pack build crates/app     --target web --out-dir "$PWD/web/app"     --no-typescript
 ```
 
 Serve `web/` with any static file server (no special headers needed):
