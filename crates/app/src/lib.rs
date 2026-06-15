@@ -282,15 +282,27 @@ impl eframe::App for RackApp {
                 }
                 if !self.customs.is_empty() {
                     ui.separator();
-                    ui.label("Saved custom modules:");
+                    ui.label("Saved custom modules (edit a name to rename):");
                     let mut remove: Option<usize> = None;
-                    for (i, c) in self.customs.iter().enumerate() {
+                    let mut renamed = false;
+                    for i in 0..self.customs.len() {
                         ui.horizontal(|ui| {
-                            ui.label(format!("{}  ({} modules)", c.name, c.sub.len()));
+                            let count = self.customs[i].sub.len();
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut self.customs[i].name)
+                                    .desired_width(150.0),
+                            );
+                            if resp.changed() {
+                                renamed = true;
+                            }
+                            ui.weak(format!("({count} modules)"));
                             if ui.small_button("🗑").on_hover_text("Delete").clicked() {
                                 remove = Some(i);
                             }
                         });
+                    }
+                    if renamed {
+                        patch_io::save_customs(&self.customs);
                     }
                     if let Some(i) = remove {
                         self.customs.remove(i);

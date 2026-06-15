@@ -311,6 +311,8 @@ pub struct RackState {
     redo: Vec<Patch>,
     /// Active theme palette for the hand-painted canvas (set each frame).
     palette: Palette,
+    /// In-progress group rename: (group, edit buffer). Shows a small dialog.
+    group_rename: Option<(GroupId, String)>,
 }
 
 impl RackState {
@@ -329,6 +331,7 @@ impl RackState {
             undo: Vec::new(),
             redo: Vec::new(),
             palette: Theme::Dark.palette(),
+            group_rename: None,
         }
     }
 
@@ -736,7 +739,47 @@ impl RackState {
             self.paint_cables(ui);
         });
 
+        self.rename_dialog(ui);
+
         topology_changed
+    }
+
+    /// Floating "rename group" dialog, shown while `group_rename` is set.
+    fn rename_dialog(&mut self, ui: &mut Ui) {
+        let Some((gid, mut buf)) = self.group_rename.take() else { return };
+        let mut commit = false;
+        let mut cancel = false;
+        egui::Window::new("Rename group")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ui.ctx(), |ui| {
+                let resp = ui.text_edit_singleline(&mut buf);
+                resp.request_focus();
+                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    commit = true;
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Rename").clicked() {
+                        commit = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if commit {
+            let name = buf.trim();
+            if !name.is_empty() {
+                if let Some(g) = self.patch.groups.get_mut(&gid) {
+                    g.name = name.to_owned();
+                }
+                self.param_changed = true; // triggers autosave
+            }
+        } else if !cancel {
+            // Not committed or cancelled yet — keep the dialog open next frame.
+            self.group_rename = Some((gid, buf));
+        }
     }
 
     /// Draw a collapsed group as a single box exposing its designed interface.
@@ -967,6 +1010,10 @@ impl RackState {
             self.group_drag = None;
         }
         title_resp.context_menu(|ui| {
+            if ui.button("Rename…").clicked() {
+                self.group_rename = Some((gid, name.clone()));
+                ui.close();
+            }
             if ui.button("Expand").clicked() {
                 if let Some(gg) = self.patch.groups.get_mut(&gid) {
                     gg.collapsed = false;
@@ -1176,6 +1223,11 @@ impl RackState {
             // group the current multi-selection.
             if let Some(gid) = group {
                 ui.separator();
+                if ui.button("Rename group…").clicked() {
+                    let nm = self.patch.groups.get(&gid).map(|g| g.name.clone()).unwrap_or_default();
+                    self.group_rename = Some((gid, nm));
+                    ui.close();
+                }
                 if ui.button("Collapse group").clicked() {
                     if let Some(gg) = self.patch.groups.get_mut(&gid) {
                         gg.collapsed = true;
