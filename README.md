@@ -76,6 +76,10 @@ so the built wasm never needs to live in the repo.
   drop a `patch.json` onto the window to import.
 - Feedback patches are legal: back-edges read the previous 32-frame block
   (~0.67 ms at 48 kHz).
+- **Output safety stage** (always on, after the whole patch): NaN/Inf guard,
+  a ~20 Hz DC/subsonic high-pass to protect woofers, and a stereo-linked peak
+  limiter (~ −1 dB ceiling) that tames runaway feedback, self-oscillation, and
+  patching spikes so nothing slams the speakers to full scale.
 
 Voltage conventions follow VCV: ±5 V audio, 0–10 V unipolar CV, 10 V gates,
 1 V/oct pitch with 0 V = C4.

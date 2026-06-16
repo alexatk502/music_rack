@@ -484,6 +484,59 @@ pub struct MasterOut {
     pub r: [f32; BLOCK],
 }
 
+/// Always-on speaker/ear protection on the final output, applied after every
+/// patch regardless of its contents:
+///   1. NaN/Inf guard — non-finite samples become silence (no loud garbage).
+///   2. DC + subsonic high-pass (~20 Hz) — stops a DC offset or sub-20 Hz
+///      content from over-exciting woofers.
+///   3. Linked peak limiter (~ -1 dB ceiling) — tames runaway feedback /
+///      self-oscillation / patching spikes so nothing slams to full scale.
+///   4. Hard clamp to ±1.0 as the absolute backstop.
+struct MasterGuard {
+    dc_x: [f32; 2],
+    dc_y: [f32; 2],
+    gain: f32,
+}
+
+impl MasterGuard {
+    const CEILING: f32 = 0.9;
+
+    fn new() -> Self {
+        Self { dc_x: [0.0; 2], dc_y: [0.0; 2], gain: 1.0 }
+    }
+
+    fn process(&mut self, ctx: &ProcessCtx, l: &mut [f32], r: &mut [f32], frames: usize) {
+        // One-pole DC blocker coefficient for a ~20 Hz corner.
+        let r_dc = (-2.0 * core::f32::consts::PI * 20.0 * ctx.inv_sample_rate).exp();
+        // Limiter: ~1 ms attack (clamp fast), ~120 ms release (recover gently).
+        let atk = 1.0 - (-1.0 / (0.001 * ctx.sample_rate)).exp();
+        let rel = 1.0 - (-1.0 / (0.120 * ctx.sample_rate)).exp();
+        for i in 0..frames {
+            let mut sl = if l[i].is_finite() { l[i] } else { 0.0 };
+            let mut sr = if r[i].is_finite() { r[i] } else { 0.0 };
+
+            let yl = sl - self.dc_x[0] + r_dc * self.dc_y[0];
+            self.dc_x[0] = sl;
+            self.dc_y[0] = if yl.is_finite() { yl } else { 0.0 };
+            sl = self.dc_y[0];
+
+            let yr = sr - self.dc_x[1] + r_dc * self.dc_y[1];
+            self.dc_x[1] = sr;
+            self.dc_y[1] = if yr.is_finite() { yr } else { 0.0 };
+            sr = self.dc_y[1];
+
+            // Feed-forward peak limiter, stereo-linked so the image is stable.
+            let peak = sl.abs().max(sr.abs());
+            let desired = if peak > Self::CEILING { Self::CEILING / peak } else { 1.0 };
+            let coeff = if desired < self.gain { atk } else { rel };
+            self.gain += coeff * (desired - self.gain);
+
+            l[i] = (sl * self.gain).clamp(-1.0, 1.0);
+            r[i] = (sr * self.gain).clamp(-1.0, 1.0);
+        }
+    }
+}
+
 pub struct Executor {
     slots: Vec<Option<ModuleSlot>>,
     buffers: Vec<PortBuffer>,
@@ -497,6 +550,8 @@ pub struct Executor {
     /// Signal taps for UI meters, indexed by slot.
     taps: Box<[ScopeTap; MAX_MODULES]>,
     pub master: MasterOut,
+    /// Always-on output protection (DC block + limiter + clamp).
+    guard: MasterGuard,
 }
 
 impl Executor {
@@ -513,6 +568,7 @@ impl Executor {
             scratch: Box::new([PortBuffer::silent(); MAX_PORTS_IN]),
             taps: Box::new([ScopeTap::new(); MAX_MODULES]),
             master: MasterOut { l: [0.0; BLOCK], r: [0.0; BLOCK] },
+            guard: MasterGuard::new(),
         }
     }
 
@@ -1141,6 +1197,9 @@ impl Executor {
                 tap.feed(&self.buffers[step.outputs[0] as usize].data[0][..frames]);
             }
         }
+
+        // Final speaker/ear protection on the master bus.
+        self.guard.process(ctx, &mut self.master.l, &mut self.master.r, frames);
     }
 }
 
@@ -1177,6 +1236,34 @@ mod tests {
         steps[3] = PlanStep { slot: 3, kind: ModuleKindId::Output as u16, ..Default::default() };
         steps[3].inputs[0] = 10;
         encode_plan(1, &modules, &steps)
+    }
+
+    #[test]
+    fn master_guard_bounds_and_blocks_dc() {
+        let ctx = ProcessCtx::new(48_000.0);
+
+        // Non-finite and wildly out-of-range samples must come out finite and
+        // within ±1 (no loud garbage, no full-scale slam past the ceiling).
+        let mut g = MasterGuard::new();
+        let mut l = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 50.0, -80.0, 9.0, 9.0, 9.0];
+        let mut r = l;
+        let n = l.len();
+        g.process(&ctx, &mut l, &mut r, n);
+        for &s in l.iter().chain(r.iter()) {
+            assert!(s.is_finite(), "non-finite leaked to output");
+            assert!(s.abs() <= 1.0 + 1e-6, "output exceeded ±1: {s}");
+        }
+
+        // A constant (DC) input must be high-passed away toward silence.
+        let mut g = MasterGuard::new();
+        let mut last = 1.0f32;
+        for _ in 0..1000 {
+            let mut l = [1.0f32; BLOCK];
+            let mut r = [1.0f32; BLOCK];
+            g.process(&ctx, &mut l, &mut r, BLOCK);
+            last = l[BLOCK - 1];
+        }
+        assert!(last.abs() < 0.02, "DC offset not blocked: {last}");
     }
 
     #[test]
